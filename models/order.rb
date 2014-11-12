@@ -40,27 +40,6 @@ class Order
     hashes order_ids
   end
 
-  def self.simple_price_buy
-    # TODO: implement the real way
-    # 500 - 1%
-    455
-  end
-
-  def self.simple_price_sell
-    # TODO: +1 %
-    465
-  end
-
-  def self.create_simple(user_id: user_id, type: type, amount: amount)
-    price = if type == :buy
-      simple_price_buy
-    else
-      simple_price_sell
-    end
-
-    create(user_id: user_id, type: type, amount: amount, price: price)
-  end
-
   def self.create(user_id: user_id, type: type, amount: amount, price: price)
 
     # TODO: refactor!!! this is getting big!
@@ -81,9 +60,9 @@ class Order
     balance = user.balance
 
     # TODO: FIXME sanitize price parameter (can't place order < 0 or > 3000
-    raise "PriceError" if price <= 0 || price > 3000
+    raise "PriceError" if price <= 0 and type != mkt
     # TODO: FIXME check if amount is available
-    raise "AmountError" if amount > 10 || amount < 0.0001 # limit to 10 BTC
+    raise "AmountError" if amount < 0.0001 # limit to 10 BTC
     raise "TypeError" unless [:buy, :sell].include?(type)
     raise "NotEnoughFundsEur - amount: #{amount}, balance: #{balance.eur_available}" if type == :buy && amount > balance.eur_available
     raise "NotEnoughFundsBtc - amount: #{amount}, balance: #{balance.btc_available}" if type == :sell && amount > balance.btc_available
@@ -94,21 +73,25 @@ class Order
     time = Time.now.to_i
 
     # puts "create order: #{id}, type: #{type},\t price: #{price.to_2s}, amount: #{amount.to_ds}"
-    
+    #Maybe is better whether first we check if we can resolve the order if it's possible resolve it and 
+    #then call redis.
     R.hmset "orders:#{id}", {
       id:       id, 
       user_id:  user_id,
       type:     type,
       amount:   amount.to_ds,
       price:    price.to_2s, 
-      time:     time,
+      time:     time, #Why time?
     }.to_a.flatten
-
-    R.zadd "orders_#{type}", (price*100).to_i, id
-    R.sadd "orders|#{type}", id # FIXME: probably we don't need a set equal to sorted set
-    R.sadd "users:#{user_id}:orders", id
-    R.sadd "users:#{user_id}:orders_#{type}", id
-
+    
+    if type != mkt 
+      R.zadd "orders_#{type}", (price*100).to_i, id
+      R.sadd "orders|#{type}", id # FIXME: probably we don't need a set equal to sorted set
+      R.sadd "users:#{user_id}:orders", id
+      R.sadd "users:#{user_id}:orders_#{type}", id
+    else
+      R.zadd "orders_#{type}", id, id
+      
     order = new(id: id, user_id: user_id, type: type, amount: amount, price: price, time: time)
 
     # TODO: subtract from total balance
